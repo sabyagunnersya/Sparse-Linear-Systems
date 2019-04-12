@@ -1,0 +1,278 @@
+% Domain is 0<=x<=1 and 0<=y<=1 ; This has already been normalized
+% Left and bottom boundary conditions are T=0; Right and Top boundary conditions are T=1
+% Perform the analysis for delX = delY = 0.1 and then plug in 0.05 and 0.01 for the other cases
+
+delX = 0.01;
+delY = 0.01;
+nx = 1/delX + 1; % number of grid points along x dimension
+ny = nx; % we are using a square grid
+npoints = nx*ny;
+
+A = zeros(npoints,npoints); % coefficient matrix
+b = zeros(npoints,1); % contains the values on RHS
+
+% filling in the matrix for the lower boundary points
+for i=1:nx % does not include T_11 for case 1: delX=delY=0.
+    b(i,1)=0;
+    A(i,i)=1;
+end
+
+% filling in the matrix for the left boundary points
+for i=1:nx:((ny-1)*nx) % does not include T_111 for case 1: delX=delY=0.
+    b(i,1)=0;
+    A(i,i)=1;
+end
+
+% filling in the matrix for the top boundary points
+for i=(nx*ny):-1:(nx*ny)-nx % includes T_111 for case 1: delX=delY=0.1
+    b(i,1)=1;
+    A(i,i)=1;
+end
+
+% filling in the matrix for the right boundary points
+for i=nx:nx:(nx*ny) % includes T_11 for case 1: delX=delY=0.1
+    b(i,1)=1;
+    A(i,i)=1;
+end
+
+index = 0;
+% filling in the interior points
+for i=2:(nx-1)
+    for j=2:(ny-1)
+        index = (j-1)*nx + i;
+        A(index,index)=-4;
+        A(index,index+1)=1;
+        A(index,index-1)=1;
+        A(index,index-nx)=1;
+        A(index,index+nx)=1;
+    end
+end
+
+% The co-efficient matrix is complete now
+save ('coeff.dat','A','-ASCII')
+disp('Coeff matrix done');
+omegaOpt = creatingIterationMatrix(A, npoints);
+SORiterations(A, b, npoints, omegaOpt);
+GS(A, b, npoints);
+jacobi(A, b, npoints);
+
+
+
+
+
+
+
+
+
+
+
+function omegaOpt = creatingIterationMatrix(A, npoints)
+
+D = zeros(npoints,npoints);
+E = zeros(npoints,npoints);
+F = zeros(npoints,npoints);
+
+for i=1:npoints
+    D(i,i) = A(i,i); % forming the diagonal matrix
+end
+
+for i=1:npoints
+    for j=1:npoints
+        if i>j
+            E(i,j) = -A(i,j); % lower triangular matrix
+        end
+        if i<j
+            F(i,j) = -A(i,j); % upper triangular matrix
+        end
+    end
+end
+
+GJacobi = D\(E+F);
+GGS = (D-E)\F;
+disp('Iteration matrix done');
+omegaOpt = spectralRadius(GJacobi, GGS);
+
+end
+    
+    
+
+
+
+
+
+
+function omegaOpt = spectralRadius(GJacobi, GGS)
+
+eJacobi = eig(GJacobi); % returns the eigenvalues 
+disp('Eig Jacobi done');
+eGS = eig(GGS);
+disp('Eig GS done');
+
+rhoJacobi = max(eJacobi);
+rhoGS = max(eGS);
+
+omegaOpt = SOROpt(rhoJacobi); % for calculating optimum SOR factor
+
+fprintf('Spectral radius using Jacobi: %f \n', rhoJacobi);
+fprintf('Spectral radius using GS: %f \n', rhoGS);
+
+convRateJacobi = -log(rhoJacobi);
+convRateGS = -log(rhoGS);
+
+fprintf('Convergence rate Jacobi: %f \n', convRateJacobi);
+fprintf('Convergence rate GS: %f \n', convRateGS);
+
+disp('Spectral radius done');
+
+end
+
+
+
+
+
+
+
+
+function omegaOpt = SOROpt(rhoJacobi)
+
+omegaOpt = 2/(1+sqrt(1-rhoJacobi^2));
+fprintf('The optimum SOR factor is %f \n', omegaOpt);
+
+end
+
+
+
+
+
+
+
+
+function SORiterations(A, b, npoints, w)
+
+T_Old = zeros(npoints,1); % Initialize unknown vector to zeros
+T = zeros(npoints,1);
+TStar = zeros(npoints,1);
+
+counter = 0; % Counts number of iterations
+
+% Don't use vectorized code - we need to mimic C
+while true
+    
+    counter = counter+1;
+    
+    for i=1:npoints
+        sum1=0;
+        sum2=0;
+        for j=1:npoints
+            if i~=j && i<j
+                sum1 = sum1 + A(i,j)*T_Old(j,1);
+            end
+            if i~=j && i>j
+                sum2 = sum2 + A(i,j)*T(j,1);
+            end
+        end
+        TStar(i,1) = (b(i,1) - sum1 - sum2)/A(i,i);
+        T(i,1) = T_Old(i,1) + w*(TStar(i,1)-T_Old(i,1));
+    end
+    
+    diff = abs(T(:,1) - T_Old(:,1));
+    T_Old = T;
+    
+    if max(diff)<1e-7
+        break;
+    end
+    
+end
+
+fprintf('No. of iterations in SOR: %d \n', counter);
+disp('SOR iterations done');
+
+end
+
+
+
+
+
+
+
+
+function GS(A,b,npoints)
+
+T_Old = zeros(npoints,1); % Initialize unknown vector to zeros
+T = zeros(npoints,1);
+counter = 0; % Counts number of iterations
+
+% Don't use vectorized code - we need to mimic C
+while true
+    
+    counter = counter+1;
+    
+    for i=1:npoints
+        sum1=0;
+        sum2=0;
+        for j=1:npoints
+            if i~=j && i<j
+                sum1 = sum1 + A(i,j)*T_Old(j,1);
+            end
+            if i~=j && i>j
+                sum2 = sum2 + A(i,j)*T(j,1);
+            end
+        end
+        T(i,1) = (b(i,1) - sum1 - sum2)/A(i,i);
+    end
+    
+    diff = abs(T(:,1) - T_Old(:,1));
+    T_Old = T;
+    
+    if max(diff)<1e-7
+        break;
+    end
+    
+end
+
+fprintf('No. of iterations in GS: %d \n', counter);
+disp('GS done');
+
+end
+
+
+
+
+
+
+
+
+function jacobi(A, b, npoints)
+
+T_Old = zeros(npoints,1); % Initialize unknown vector to zeros
+T = zeros(npoints,1);
+counter = 0; % Counts number of iterations
+
+% Don't use vectorized code - we need to mimic C
+while true
+    
+    counter = counter+1;
+    
+    for i=1:npoints
+        sum=0;
+        for j=1:npoints
+            if i~=j
+                sum = sum + A(i,j)*T_Old(j,1);
+            end
+        end
+        T(i,1) = (b(i,1) - sum)/A(i,i);
+    end
+    
+    diff = abs(T(:,1) - T_Old(:,1));
+    T_Old = T;
+    
+    if max(diff)<1e-7
+        break;
+    end
+    
+end
+
+fprintf('No. of iterations in Jacobi: %d \n', counter);
+disp('Jacobi done');
+
+end
